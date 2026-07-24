@@ -140,11 +140,8 @@ def upgrade():
 
 def main():
     if "--uninstall" in sys.argv:
-        banner()
         uninstall()
         return
-
-    banner()
 
     if "--upgrade" in sys.argv:
         upgrade()

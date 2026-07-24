@@ -689,6 +689,7 @@ def _detect_url_type(url):
 def cmd_youtube(args):
     if not args:
         pr(C.RED, "  Usage: wp youtube <url>")
+        pr(C.GRY, "  Supports: single videos, playlists, channels")
         return 1
 
     url = args[0]
@@ -703,20 +704,42 @@ def cmd_youtube(args):
         pr(C.RED, "  yt-dlp not found. Install: brew install yt-dlp (macOS) / winget install yt-dlp (Windows) / sudo apt install yt-dlp (Linux)")
         return 1
 
+    is_playlist = any(x in url.lower() for x in ["playlist?", "/playlist", "/channel/", "/c/", "/user/", "/@"])
+    if "--playlist" in args:
+        is_playlist = True
+    if "--no-playlist" in args:
+        is_playlist = False
+
     download_dir = _get_download_dir()
     download_dir.mkdir(parents=True, exist_ok=True)
-    pr(C.CYN, f"\n  Downloading: {C.WHT}{url}{C.RST}\n")
 
-    cmd = [
-        "yt-dlp",
-        "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
-        "--merge-output-format", "mp4",
-        "-o", str(download_dir / "%(title)s.%(ext)s"),
-        "--no-playlist", "--newline", url
-    ]
+    if is_playlist:
+        pr(C.CYN, f"\n  Downloading playlist: {C.WHT}{url}{C.RST}\n")
+        cmd = [
+            "yt-dlp",
+            "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
+            "--merge-output-format", "mp4",
+            "-o", str(download_dir / "%(playlist_index)s - %(title)s.%(ext)s"),
+            "--yes-playlist", "--newline",
+            "--sleep-interval", "3",
+            "--max-sleep-interval", "8",
+            "--retries", "3",
+            "--retry-sleep", "5",
+            url
+        ]
+    else:
+        pr(C.CYN, f"\n  Downloading: {C.WHT}{url}{C.RST}\n")
+        cmd = [
+            "yt-dlp",
+            "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
+            "--merge-output-format", "mp4",
+            "-o", str(download_dir / "%(title)s.%(ext)s"),
+            "--no-playlist", "--newline", url
+        ]
 
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        current_idx = ""
         for line in proc.stdout:
             line = line.strip()
             if "[download]" in line and "%" in line:
@@ -725,6 +748,9 @@ def cmd_youtube(args):
                         sys.stdout.write(f"\r  {C.CYN}⬇{C.RST}  {p}  ")
                         sys.stdout.flush()
                         break
+            elif "[download] Downloading item" in line:
+                current_idx = line.split()[-1].rstrip(":")
+                pr(C.CYN, f"\n  [{current_idx}] ", end="")
             elif "Merger" in line:
                 spinner("Merging formats")
         proc.wait()
@@ -750,8 +776,16 @@ def cmd_youtube(args):
         pr(C.RED, "  Could not find downloaded file")
         return 1
 
-    downloaded = mp4s[0]
-    pr(C.GRN, f"\n  Downloaded: {C.BLD}{downloaded.name}{C.RST}")
+    if is_playlist and len(mp4s) > 1:
+        pr(C.GRN, f"\n  Downloaded {len(mp4s)} videos from playlist")
+        pr(C.GRY, f"  Files in: {download_dir}")
+        downloaded = tui_file_picker(title="Select Video from Playlist")
+        if downloaded is None:
+            pr(C.YLW, "  Cancelled")
+            return 0
+    else:
+        downloaded = mp4s[0]
+        pr(C.GRN, f"\n  Downloaded: {C.BLD}{downloaded.name}{C.RST}")
 
     pr(C.CYN, "\n  Configure audio:\n")
     audio_on, audio_vol = tui_audio_prompt()
@@ -795,6 +829,8 @@ def cmd_spotify(args):
         pr(C.RED, "  ffmpeg not found. Install: brew install ffmpeg / winget install ffmpeg / sudo apt install ffmpeg")
         return 1
 
+    is_playlist = "playlist" in query.lower() or "album" in query.lower()
+
     download_dir = _get_download_dir()
     download_dir.mkdir(parents=True, exist_ok=True)
     pr(C.CYN, f"\n  Downloading from Spotify: {C.WHT}{query}{C.RST}\n")
@@ -802,10 +838,12 @@ def cmd_spotify(args):
     cmd = ["spotdl", "download", query, "--output", str(download_dir), "--format", "mp3"]
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        count = 0
         for line in proc.stdout:
             line = line.strip()
             if "Downloading" in line or "downloaded" in line.lower():
-                sys.stdout.write(f"\r  {C.CYN}♫{C.RST}  {line[:70]}  ")
+                count += 1
+                sys.stdout.write(f"\r  {C.CYN}♫{C.RST}  [{count}] {line[:60]}  ")
                 sys.stdout.flush()
         proc.wait()
         print()
@@ -825,8 +863,16 @@ def cmd_spotify(args):
         pr(C.RED, "  No audio file found")
         return 1
 
-    downloaded = mp3s[0]
-    pr(C.GRN, f"\n  Downloaded: {C.BLD}{downloaded.name}{C.RST}")
+    if is_playlist and len(mp3s) > 1:
+        pr(C.GRN, f"\n  Downloaded {len(mp3s)} tracks from playlist")
+        pr(C.GRY, f"  Files in: {download_dir}")
+        downloaded = tui_file_picker(title="Select Track from Playlist")
+        if downloaded is None:
+            pr(C.YLW, "  Cancelled")
+            return 0
+    else:
+        downloaded = mp3s[0]
+        pr(C.GRN, f"\n  Downloaded: {C.BLD}{downloaded.name}{C.RST}")
 
     video_path = download_dir / (downloaded.stem + "_audio.mp4")
     spinner("Creating audio wallpaper")
@@ -1155,8 +1201,8 @@ def cmd_help(_args=None):
     banner()
     commands = [
         (f"{C.BLD}wp set{C.RST}               Pick video + audio in TUI and play"),
-        (f"{C.BLD}wp youtube{C.RST} <url>     Download YouTube, pick audio, play"),
-        (f"{C.BLD}wp spotify{C.RST} <query>   Download from Spotify, pick audio, play"),
+        (f"{C.BLD}wp youtube{C.RST} <url>     Download YouTube video or playlist"),
+        (f"{C.BLD}wp spotify{C.RST} <query>   Download from Spotify (tracks/playlists)"),
         (f"{C.BLD}wp stop{C.RST}              Stop the wallpaper"),
         (f"{C.BLD}wp play{C.RST}              Resume playback"),
         (f"{C.BLD}wp pause{C.RST}             Pause playback"),
@@ -1177,6 +1223,11 @@ def cmd_help(_args=None):
         pr(C.WHT, f"    {line}")
     print()
     pr(C.GRY, "  Subcommands:")
+    pr(C.WHT, f"    wp youtube URL          Single video")
+    pr(C.WHT, f"    wp youtube PLAYLIST_URL Playlist (auto-detected)")
+    pr(C.WHT, f"    wp youtube URL --playlist  Force playlist mode")
+    pr(C.WHT, f"    wp spotify URL          Single track")
+    pr(C.WHT, f"    wp spotify PLAYLIST_URL Playlist (auto-detected)")
     pr(C.WHT, f"    wp audio              Show audio status")
     pr(C.WHT, f"    wp audio on/off       Toggle audio")
     pr(C.WHT, f"    wp audio 75           Set volume to 75%")

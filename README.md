@@ -1,5 +1,7 @@
 # WP — Live Wallpaper
 
+[![Donate](https://img.shields.io/badge/Donate-Sociabuzz-orange?style=for-the-badge&logo=buymeacoffee&logoColor=white)](https://sociabuzz.com/zerobyte/tribe)
+
 Play videos as your desktop background. macOS, Windows, Linux.
 
 YouTube, Spotify, or any video file. Runs behind your icons, uses barely any resources.
@@ -90,10 +92,6 @@ wp config auto-update on    # re-enable it
 ```
 
 Your config in `~/.config/` is never touched by updates. Videos, settings, download directory — all preserved.
-
-## Donate
-
-If this saved you time: https://sociabuzz.com/zerobyte/tribe
 
 ## License
 

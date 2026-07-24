@@ -314,7 +314,23 @@ def _load_config():
             return json.loads(cfg.read_text())
         except (json.JSONDecodeError, OSError):
             pass
-    return {}
+    return _generate_config()
+
+def _generate_config():
+    default = {
+        "enabled": False,
+        "currentVideo": None,
+        "audioEnabled": False,
+        "volume": 0.5,
+        "fillMode": "aspectFill",
+        "displayMode": "all",
+        "downloadDir": str(CONFIG_DIR / "cache"),
+        "autoUpdate": True,
+        "autoPause": False
+    }
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    (CONFIG_DIR / "config.json").write_text(json.dumps(default, indent=2))
+    return default
 
 def _get_download_dir():
     cfg = _load_config()
@@ -1152,15 +1168,11 @@ def cmd_config(args):
         pr(C.GRN, f"  Auto-update: {'ON' if val == 'on' else 'OFF'}")
         return 0
 
-    config_file = CONFIG_DIR / "config.json"
-    if not config_file.exists():
-        pr(C.YLW, "  No config found.")
-        return 0
-    try:
-        config = json.loads(config_file.read_text())
-    except json.JSONDecodeError:
+    cfg = _load_config()
+    if not cfg:
         pr(C.RED, "  Corrupt config file")
         return 1
+    config = cfg
 
     video = config.get("currentVideo", "none")
     if video and video != "none":
@@ -1177,7 +1189,7 @@ def cmd_config(args):
         f"  Auto-Update:   {C.WHT}{'On' if config.get('autoUpdate', True) else 'Off'}{C.RST}",
     ]
     box(lines, "Configuration")
-    pr(C.GRY, f"\n  Config file: {config_file}")
+    pr(C.GRY, f"\n  Config file: {CONFIG_DIR / 'config.json'}")
     return 0
 
 def cmd_backup(args):

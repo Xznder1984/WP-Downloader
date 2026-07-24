@@ -77,10 +77,11 @@ def install_system_deps():
 
 def install_pip_deps():
     print("📦 Installing pip dependencies...")
-    run(f"{sys.executable} -m pip install --upgrade pip", capture=False)
+    flag = "" if IS_WINDOWS else "--break-system-packages"
+    run(f"{sys.executable} -m pip install {flag} --upgrade pip", capture=False)
     for pkg in ["yt-dlp", "spotdl", "psutil", "requests"]:
         print(f"  → pip install {pkg}")
-        run(f"{sys.executable} -m pip install {pkg}", capture=False)
+        run(f"{sys.executable} -m pip install {flag} {pkg}", capture=False)
     print("✅ Pip deps done")
 
 def build_engine():

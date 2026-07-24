@@ -1898,14 +1898,33 @@ COMMANDS = {
     "help": cmd_help, "version": cmd_version,
 }
 
+def _auto_update():
+    cfg = _load_config()
+    if not cfg.get("autoUpdate", True):
+        return
+    if not check_internet():
+        return
+    needs, cur, lat = check_for_update(silent=True)
+    if not needs:
+        return
+    install_dir = Path(__file__).resolve().parent.parent
+    try:
+        subprocess.run(
+            ["git", "-C", str(install_dir), "pull", "--rebase"],
+            capture_output=True, timeout=30
+        )
+        install_py = install_dir / "install.py"
+        if install_py.exists():
+            subprocess.run(
+                [sys.executable, str(install_py), "--upgrade"],
+                capture_output=True, timeout=120
+            )
+    except Exception:
+        pass
+
 def main():
     if len(sys.argv) < 2:
-        cfg = _load_config()
-        if cfg.get("autoUpdate", True) and check_internet():
-            needs, cur, lat = check_for_update(silent=True)
-            if needs:
-                pr(C.CYN, f"\n  Update available: v{cur} → v{lat}")
-                pr(C.GRY, "  Run: wp update auto\n")
+        _auto_update()
         cmd_help()
         return 0
     cmd = sys.argv[1].lower()

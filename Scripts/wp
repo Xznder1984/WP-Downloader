@@ -1027,16 +1027,6 @@ def cmd_volume(args):
     pr(C.GRY, "  Volume is configured via config file:")
     pr(C.GRY, "  wp config set volume 0.7")
     return 0
-            if not is_daemon_running():
-                pr(C.RED, "  Daemon not running")
-                return 1
-            send_command(f"volume {v}")
-            pr(C.GRN, f"  Volume: {int(v)}%")
-            return 0
-    except ValueError:
-        pass
-    pr(C.RED, "  Usage: wp volume <0-100>")
-    return 1
 
 def cmd_play(_args=None):
     if not is_daemon_running():

@@ -919,6 +919,60 @@ def cmd_stop(_args=None):
     pr(C.GRN, "  Wallpaper stopped")
     return 0
 
+def cmd_audio(args):
+    if not args:
+        result = send_command("audio")
+        if result and "error" not in result:
+            state = result.get("state", "off")
+            vol = int(result.get("volume", 0.5) * 100)
+            pr(C.GRN, f"  Audio: {'ON' if state == 'on' else 'OFF'}  Volume: {vol}%")
+        else:
+            pr(C.RED, "  Daemon not running")
+        return 0
+
+    sub = args[0]
+    if sub in ("on", "off"):
+        if not is_daemon_running():
+            pr(C.RED, "  Daemon not running. Start with: wp set")
+            return 1
+        result = send_command(f"audio {sub}")
+        pr(C.GRN, f"  Audio {sub}") if result and "error" not in result else pr(C.RED, "  Failed")
+        return 0
+
+    try:
+        v = float(sub)
+        if 0 <= v <= 100:
+            if not is_daemon_running():
+                pr(C.RED, "  Daemon not running. Start with: wp set")
+                return 1
+            send_command(f"audio {v}")
+            send_command(f"volume {v}")
+            pr(C.GRN, f"  Volume: {int(v)}%")
+            return 0
+    except ValueError:
+        pass
+
+    pr(C.RED, "  Usage: wp audio <on|off|0-100>")
+    return 1
+
+def cmd_volume(args):
+    if not args:
+        pr(C.RED, "  Usage: wp volume <0-100>")
+        return 1
+    try:
+        v = float(args[0])
+        if 0 <= v <= 100:
+            if not is_daemon_running():
+                pr(C.RED, "  Daemon not running")
+                return 1
+            send_command(f"volume {v}")
+            pr(C.GRN, f"  Volume: {int(v)}%")
+            return 0
+    except ValueError:
+        pass
+    pr(C.RED, "  Usage: wp volume <0-100>")
+    return 1
+
 def cmd_play(_args=None):
     if not is_daemon_running():
         pr(C.RED, "  Daemon not running. Start with: wp set")

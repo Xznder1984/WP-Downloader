@@ -987,6 +987,51 @@ def cmd_status(_args=None):
     return 0
 
 def cmd_config(args):
+    if args and args[0] == "edit":
+        config_file = CONFIG_DIR / "config.json"
+        if not config_file.exists():
+            pr(C.YLW, "  No config found. Creating default...")
+            (CONFIG_DIR / "config.json").write_text(json.dumps({
+                "enabled": False, "currentVideo": None, "audioEnabled": False,
+                "volume": 0.5, "fillMode": "aspectFill", "displayMode": "all",
+                "downloadDir": str(CONFIG_DIR / "cache"), "autoUpdate": True
+            }, indent=2))
+        editor = os.environ.get("EDITOR", os.environ.get("VISUAL", "nano"))
+        pr(C.CYN, f"  Opening {editor}...")
+        os.system(f'{editor} "{CONFIG_DIR / "config.json"}"')
+        pr(C.GRN, "  Config saved. Run: wp restart")
+        return 0
+
+    if args and args[0] == "set" and len(args) >= 3:
+        key = args[1]
+        val_str = " ".join(args[2:])
+        cfg = _load_config()
+        if val_str.lower() == "true":
+            cfg[key] = True
+        elif val_str.lower() == "false":
+            cfg[key] = False
+        else:
+            try:
+                cfg[key] = int(val_str)
+            except ValueError:
+                try:
+                    cfg[key] = float(val_str)
+                except ValueError:
+                    cfg[key] = val_str
+        (CONFIG_DIR / "config.json").write_text(json.dumps(cfg, indent=2))
+        pr(C.GRN, f"  {key} = {cfg[key]}")
+        return 0
+
+    if args and args[0] == "reset":
+        default = {
+            "enabled": False, "currentVideo": None, "audioEnabled": False,
+            "volume": 0.5, "fillMode": "aspectFill", "displayMode": "all",
+            "downloadDir": str(CONFIG_DIR / "cache"), "autoUpdate": True
+        }
+        (CONFIG_DIR / "config.json").write_text(json.dumps(default, indent=2))
+        pr(C.GRN, "  Config reset to defaults")
+        return 0
+
     if args and len(args) >= 2 and args[0] == "auto-update":
         val = args[1].lower()
         if val not in ("on", "off"):
@@ -1025,6 +1070,64 @@ def cmd_config(args):
     box(lines, "Configuration")
     pr(C.GRY, f"\n  Config file: {config_file}")
     return 0
+
+def cmd_backup(args):
+    config_file = CONFIG_DIR / "config.json"
+    backup_file = CONFIG_DIR / "config.backup.json"
+
+    if args and args[0] == "restore":
+        if not backup_file.exists():
+            pr(C.RED, "  No backup found. Run: wp backup")
+            return 1
+        try:
+            data = json.loads(backup_file.read_text())
+            config_file.write_text(json.dumps(data, indent=2))
+            pr(C.GRN, "  Config restored from backup")
+            pr(C.GRY, "  Run: wp restart")
+            return 0
+        except Exception as e:
+            pr(C.RED, f"  Restore failed: {e}")
+            return 1
+
+    if args and args[0] == "diff":
+        if not backup_file.exists():
+            pr(C.RED, "  No backup found")
+            return 1
+        try:
+            current = json.loads(config_file.read_text())
+            backup = json.loads(backup_file.read_text())
+            all_keys = sorted(set(list(current.keys()) + list(backup.keys())))
+            diffs = []
+            for k in all_keys:
+                cur_val = current.get(k, "<missing>")
+                bak_val = backup.get(k, "<missing>")
+                if cur_val != bak_val:
+                    diffs.append((k, bak_val, cur_val))
+            if not diffs:
+                pr(C.GRN, "  No differences — backup matches current config")
+            else:
+                pr(C.CYN, "\n  Backup → Current differences:")
+                for k, old, new in diffs:
+                    pr(C.WHT, f"    {k}:")
+                    pr(C.RED, f"      - {old}")
+                    pr(C.GRN, f"      + {new}")
+            return 0
+        except Exception as e:
+            pr(C.RED, f"  Error: {e}")
+            return 1
+
+    if not config_file.exists():
+        pr(C.RED, "  No config to backup")
+        return 1
+    try:
+        data = json.loads(config_file.read_text())
+        backup_file.write_text(json.dumps(data, indent=2))
+        pr(C.GRN, f"  Backup saved: {backup_file}")
+        pr(C.GRY, "  Restore: wp backup restore  |  Compare: wp backup diff")
+        return 0
+    except Exception as e:
+        pr(C.RED, f"  Backup failed: {e}")
+        return 1
 
 def cmd_download_dir(args):
     if not args:
@@ -1228,6 +1331,14 @@ def cmd_help(_args=None):
     pr(C.WHT, f"    wp youtube URL --playlist  Force playlist mode")
     pr(C.WHT, f"    wp spotify URL          Single track")
     pr(C.WHT, f"    wp spotify PLAYLIST_URL Playlist (auto-detected)")
+    pr(C.WHT, f"    wp config               Show config")
+    pr(C.WHT, f"    wp config edit          Open config in $EDITOR")
+    pr(C.WHT, f"    wp config set KEY VAL   Set a config value")
+    pr(C.WHT, f"    wp config reset         Reset to defaults")
+    pr(C.WHT, f"    wp config auto-update on|off")
+    pr(C.WHT, f"    wp backup               Save config backup")
+    pr(C.WHT, f"    wp backup restore       Restore from backup")
+    pr(C.WHT, f"    wp backup diff          Compare backup vs current")
     pr(C.WHT, f"    wp audio              Show audio status")
     pr(C.WHT, f"    wp audio on/off       Toggle audio")
     pr(C.WHT, f"    wp audio 75           Set volume to 75%")
@@ -1505,6 +1616,7 @@ COMMANDS = {
     "cache": cmd_cache, "logs": cmd_logs, "doctor": cmd_doctor,
     "update": cmd_update, "check-changes": cmd_check_changes,
     "tui": cmd_tui, "memory": cmd_memory, "mem": cmd_memory,
+    "backup": cmd_backup,
     "help": cmd_help, "version": cmd_version,
 }
 

@@ -895,6 +895,111 @@ def cmd_youtube(args):
         return 1
     return 0
 
+def cmd_url(args):
+    if not args:
+        pr(C.RED, "  Usage: wp url <any-video-url>")
+        pr(C.GRY, "  Works with any site yt-dlp supports:")
+        pr(C.GRY, "    Vimeo, Dailymotion, Twitter/X, Reddit, Bilibili,")
+        pr(C.GRY, "    Twitch, TikTok, Instagram, Facebook, and 1000+ more.")
+        pr(C.GRY, "  Examples:")
+        pr(C.GRY, "    wp url https://vimeo.com/123456789")
+        pr(C.GRY, "    wp url https://www.tiktok.com/@user/video/123")
+        pr(C.GRY, "    wp url https://v.redd.it/abc123")
+        return 1
+
+    url = args[0]
+    url_type = _detect_url_type(url)
+    if url_type == "youtube":
+        pr(C.YLW, "  Detected YouTube URL, switching to wp youtube...")
+        return cmd_youtube(args)
+    if url_type == "spotify":
+        pr(C.YLW, "  Detected Spotify URL, switching to wp spotify...")
+        return cmd_spotify(args)
+    if url_type == "video":
+        pr(C.YLW, "  Detected local file, switching to wp set...")
+        return cmd_set(args)
+    if not shutil.which("yt-dlp"):
+        pr(C.RED, "  yt-dlp not found. Install: brew install yt-dlp (macOS) / winget install yt-dlp (Windows) / sudo apt install yt-dlp (Linux)")
+        return 1
+
+    download_dir = _get_download_dir()
+    download_dir.mkdir(parents=True, exist_ok=True)
+
+    pr(C.CYN, f"\n  Downloading: {C.WHT}{url}{C.RST}\n")
+    cmd = [
+        "yt-dlp",
+        "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
+        "--merge-output-format", "mp4",
+        "-o", str(download_dir / "%(title)s.%(ext)s"),
+        "--no-playlist", "--newline",
+        "--sleep-interval", "3",
+        "--max-sleep-interval", "8",
+        "--retries", "3",
+        "--retry-sleep", "5",
+        url
+    ]
+
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        for line in proc.stdout:
+            line = line.strip()
+            if "[download]" in line and "%" in line:
+                for p in line.split():
+                    if "%" in p:
+                        sys.stdout.write(f"\r  {C.CYN}⬇{C.RST}  {p}  ")
+                        sys.stdout.flush()
+                        break
+            elif "Merger" in line:
+                spinner("Merging formats")
+        proc.wait()
+        print()
+        if proc.returncode != 0:
+            pr(C.RED, "  Download failed. Make sure the URL is valid and yt-dlp supports this site.")
+            pr(C.GRY, "  Check supported sites: yt-dlp --list-extractors")
+            return 1
+    except FileNotFoundError:
+        pr(C.RED, "  yt-dlp not found")
+        return 1
+    except KeyboardInterrupt:
+        print()
+        pr(C.YLW, "  Download cancelled")
+        return 130
+
+    mp4s = sorted(download_dir.glob("*.mp4"), key=lambda f: f.stat().st_mtime, reverse=True)
+    if not mp4s:
+        mp4s = sorted(
+            [f for f in download_dir.iterdir() if f.is_file() and f.suffix in (".mkv", ".webm", ".mp4")],
+            key=lambda f: f.stat().st_mtime, reverse=True
+        )
+    if not mp4s:
+        pr(C.RED, "  Could not find downloaded file")
+        return 1
+
+    downloaded = mp4s[0]
+    pr(C.GRN, f"\n  Downloaded: {C.BLD}{downloaded.name}{C.RST}")
+
+    if not start_daemon():
+        return 1
+
+    cfg = _load_config()
+    audio_on = cfg.get("audioEnabled", False)
+    audio_vol = int(cfg.get("volume", 0.5) * 100)
+    send_command(f"audio {'on' if audio_on else 'off'}")
+    send_command(f"volume {audio_vol}")
+
+    spinner("Setting wallpaper")
+    result = send_command(f"set {downloaded}")
+    if result and "error" not in result:
+        pr(C.GRN, f"  Wallpaper set!")
+        if audio_on:
+            pr(C.GRY, f"  Audio: ON  Volume: {audio_vol}%")
+        else:
+            pr(C.GRY, f"  Audio: OFF (edit config to enable)")
+    else:
+        pr(C.RED, f"  Failed to set wallpaper")
+        return 1
+    return 0
+
 def cmd_spotify(args):
     if not args:
         pr(C.RED, "  Usage: wp spotify <url-or-query>")
@@ -1422,6 +1527,7 @@ def cmd_help(_args=None):
         (f"{C.BLD}wp set{C.RST}               Pick video + audio in TUI and play"),
         (f"{C.BLD}wp youtube{C.RST} <url>     Download YouTube video or playlist"),
         (f"{C.BLD}wp spotify{C.RST} <query>   Download from Spotify (tracks/playlists)"),
+        (f"{C.BLD}wp url{C.RST} <url>         Download from any site (Vimeo, TikTok, etc)"),
         (f"{C.BLD}wp stop{C.RST}              Stop the wallpaper"),
         (f"{C.BLD}wp play{C.RST}              Resume playback"),
         (f"{C.BLD}wp pause{C.RST}             Pause playback"),
@@ -1450,6 +1556,7 @@ def cmd_help(_args=None):
     pr(C.WHT, f"    wp youtube URL --playlist  Force playlist mode")
     pr(C.WHT, f"    wp spotify URL          Single track")
     pr(C.WHT, f"    wp spotify PLAYLIST_URL Playlist (auto-detected)")
+    pr(C.WHT, f"    wp url URL             Any video site (Vimeo, TikTok, Reddit, etc)")
     pr(C.WHT, f"    wp config               Show config")
     pr(C.WHT, f"    wp config edit          Open config in $EDITOR")
     pr(C.WHT, f"    wp config set KEY VAL   Set a config value")
@@ -2046,6 +2153,7 @@ def cmd_uninstall(args):
 COMMANDS = {
     "set": cmd_set, "youtube": cmd_youtube, "yt": cmd_youtube,
     "spotify": cmd_spotify, "sp": cmd_spotify,
+    "url": cmd_url, "from": cmd_url,
     "stop": cmd_stop, "play": cmd_play, "pause": cmd_pause, "restart": cmd_restart,
     "status": cmd_status, "config": cmd_config,
     "audio": cmd_audio, "volume": cmd_volume, "vol": cmd_volume,

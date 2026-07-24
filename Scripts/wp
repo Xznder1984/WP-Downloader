@@ -1320,6 +1320,7 @@ def cmd_help(_args=None):
         (f"{C.BLD}wp tui{C.RST}               Launch interactive TUI"),
         (f"{C.BLD}wp memory{C.RST}            Manage hourly memory purge (macOS)"),
         (f"{C.BLD}wp autostart{C.RST}         Start wallpaper on login"),
+        (f"{C.BLD}wp uninstall{C.RST}         Remove wp completely"),
         (f"{C.BLD}wp help{C.RST}              Show this help"),
         (f"{C.BLD}wp version{C.RST}           Show version"),
     ]
@@ -1751,6 +1752,81 @@ WantedBy=default.target"""
     pr(C.RED, "  Autostart not supported on this platform")
     return 1
 
+def cmd_uninstall(args):
+    pr(C.RED, "\n  This will remove wp, the daemon, config, and all data.\n")
+    try:
+        confirm = input("  Type 'yes' to confirm: ").strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        pr(C.YLW, "  Cancelled")
+        return 0
+    if confirm != "yes":
+        pr(C.YLW, "  Cancelled")
+        return 0
+
+    if is_daemon_running():
+        send_command("stop")
+        time.sleep(0.5)
+
+    removed = []
+    wp_path = Path(__file__).resolve()
+    for p in [wp_path, Path("/usr/local/bin/wp"), Path.home() / ".local" / "bin" / "wp"]:
+        if p.exists():
+            try:
+                if os.access(p, os.W_OK):
+                    p.unlink()
+                else:
+                    subprocess.run(["sudo", "rm", str(p)], capture_output=True, timeout=5)
+                removed.append(str(p))
+            except Exception:
+                pass
+
+    daemon_paths = [
+        Path("/usr/local/bin/livewallpaper"),
+        Path(__file__).resolve().parent.parent / "Build" / "livewallpaper",
+    ]
+    for p in daemon_paths:
+        if p.exists():
+            try:
+                if os.access(p, os.W_OK):
+                    p.unlink()
+                else:
+                    subprocess.run(["sudo", "rm", str(p)], capture_output=True, timeout=5)
+                removed.append(str(p))
+            except Exception:
+                pass
+
+    plist_files = [
+        Path.home() / "Library" / "LaunchAgents" / "com.xander.livewallpaper.plist",
+        Path.home() / "Library" / "LaunchAgents" / "com.xander.purge.plist",
+    ]
+    if IS_LINUX:
+        svc = Path.home() / ".config" / "systemd" / "user" / "livewallpaper.service"
+        plist_files.append(svc)
+        if svc.exists():
+            subprocess.run(["systemctl", "--user", "disable", "livewallpaper"], capture_output=True, timeout=10)
+
+    for p in plist_files:
+        if p.exists():
+            try:
+                if IS_MACOS:
+                    subprocess.run(["launchctl", "unload", str(p)], capture_output=True, timeout=10)
+                p.unlink()
+                removed.append(str(p))
+            except Exception:
+                pass
+
+    if CONFIG_DIR.exists():
+        shutil.rmtree(CONFIG_DIR, ignore_errors=True)
+        removed.append(str(CONFIG_DIR))
+
+    if removed:
+        pr(C.GRN, "\n  Removed:")
+        for r in removed:
+            pr(C.WHT, f"    {r}")
+
+    pr(C.GRN, "\n  wp uninstalled. Restart your terminal.")
+    return 0
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 COMMANDS = {
@@ -1764,6 +1840,7 @@ COMMANDS = {
     "update": cmd_update, "check-changes": cmd_check_changes,
     "tui": cmd_tui, "memory": cmd_memory, "mem": cmd_memory,
     "backup": cmd_backup, "autostart": cmd_autostart,
+    "uninstall": cmd_uninstall,
     "help": cmd_help, "version": cmd_version,
 }
 

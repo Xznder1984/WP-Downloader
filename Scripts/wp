@@ -1319,6 +1319,7 @@ def cmd_help(_args=None):
         (f"{C.BLD}wp update{C.RST}            Check for updates"),
         (f"{C.BLD}wp tui{C.RST}               Launch interactive TUI"),
         (f"{C.BLD}wp memory{C.RST}            Manage hourly memory purge (macOS)"),
+        (f"{C.BLD}wp autostart{C.RST}         Start wallpaper on login"),
         (f"{C.BLD}wp help{C.RST}              Show this help"),
         (f"{C.BLD}wp version{C.RST}           Show version"),
     ]
@@ -1339,6 +1340,8 @@ def cmd_help(_args=None):
     pr(C.WHT, f"    wp backup               Save config backup")
     pr(C.WHT, f"    wp backup restore       Restore from backup")
     pr(C.WHT, f"    wp backup diff          Compare backup vs current")
+    pr(C.WHT, f"    wp autostart on|off     Start on login")
+    pr(C.WHT, f"    wp autostart            Check autostart status")
     pr(C.WHT, f"    wp audio              Show audio status")
     pr(C.WHT, f"    wp audio on/off       Toggle audio")
     pr(C.WHT, f"    wp audio 75           Set volume to 75%")
@@ -1604,6 +1607,150 @@ def cmd_memory(args):
         pr(C.RED, "  Usage: wp memory <start|stop|now|status>")
         return 1
 
+def _get_wp_path():
+    return str(Path(__file__).resolve())
+
+def _get_daemon_path():
+    if IS_MACOS:
+        p = Path(__file__).resolve().parent.parent / "Build" / "livewallpaper"
+        if p.exists():
+            return str(p)
+        return "livewallpaper"
+    else:
+        return f"{sys.executable} {Path(__file__).resolve().parent.parent / 'Sources' / ('engine_linux.py' if IS_LINUX else 'engine_win.py')}"
+
+def cmd_autostart(args):
+    sub = args[0] if args else "status"
+
+    if IS_MACOS:
+        plist_name = "com.xander.livewallpaper"
+        plist_dst = Path.home() / "Library" / "LaunchAgents" / f"{plist_name}.plist"
+        daemon = _get_daemon_path()
+
+        if sub == "on":
+            plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{plist_name}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{daemon}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>{CONFIG_DIR / "daemon.log"}</string>
+    <key>StandardErrorPath</key>
+    <string>{CONFIG_DIR / "daemon.log"}</string>
+</dict>
+</plist>"""
+            (Path.home() / "Library" / "LaunchAgents").mkdir(parents=True, exist_ok=True)
+            plist_dst.write_text(plist)
+            subprocess.run(["launchctl", "load", str(plist_dst)], capture_output=True, timeout=10)
+            pr(C.GRN, "  Autostart enabled (LaunchAgent)")
+            pr(C.GRY, f"  {plist_dst}")
+            return 0
+
+        elif sub == "off":
+            if plist_dst.exists():
+                subprocess.run(["launchctl", "unload", str(plist_dst)], capture_output=True, timeout=10)
+                plist_dst.unlink()
+                pr(C.GRN, "  Autostart disabled")
+            else:
+                pr(C.YLW, "  Autostart was not enabled")
+            return 0
+
+        else:
+            loaded = plist_dst.exists()
+            pr(C.GRN, "  ● Autostart is ON" if loaded else C.YLW + "  ○ Autostart is OFF")
+            if loaded:
+                pr(C.GRY, f"  {plist_dst}")
+            return 0
+
+    elif IS_LINUX:
+        service_dir = Path.home() / ".config" / "systemd" / "user"
+        service_file = service_dir / "livewallpaper.service"
+        daemon = _get_daemon_path()
+
+        if sub == "on":
+            service_dir.mkdir(parents=True, exist_ok=True)
+            service = f"""[Unit]
+Description=Live Wallpaper Daemon
+
+[Service]
+Type=simple
+ExecStart={daemon}
+Restart=on-failure
+
+[Install]
+WantedBy=default.target"""
+            service_file.write_text(service)
+            subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, timeout=10)
+            subprocess.run(["systemctl", "--user", "enable", "livewallpaper"], capture_output=True, timeout=10)
+            pr(C.GRN, "  Autostart enabled (systemd user service)")
+            pr(C.GRY, f"  {service_file}")
+            return 0
+
+        elif sub == "off":
+            if service_file.exists():
+                subprocess.run(["systemctl", "--user", "disable", "livewallpaper"], capture_output=True, timeout=10)
+                service_file.unlink()
+                pr(C.GRN, "  Autostart disabled")
+            else:
+                pr(C.YLW, "  Autostart was not enabled")
+            return 0
+
+        else:
+            loaded = service_file.exists()
+            pr(C.GRN, "  ● Autostart is ON" if loaded else C.YLW + "  ○ Autostart is OFF")
+            if loaded:
+                pr(C.GRY, f"  {service_file}")
+            return 0
+
+    elif IS_WINDOWS:
+        import winreg
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        reg_name = "LiveWallpaper"
+        daemon = _get_daemon_path()
+
+        if sub == "on":
+            try:
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+                winreg.SetValueEx(key, reg_name, 0, winreg.REG_SZ, f'"{sys.executable}" "{Path(__file__).resolve().parent.parent / "Sources" / "engine_win.py"}"')
+                winreg.CloseKey(key)
+                pr(C.GRN, "  Autostart enabled (Registry)")
+            except Exception as e:
+                pr(C.RED, f"  Failed: {e}")
+                return 1
+            return 0
+
+        elif sub == "off":
+            try:
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+                winreg.DeleteValue(key, reg_name)
+                winreg.CloseKey(key)
+                pr(C.GRN, "  Autostart disabled")
+            except FileNotFoundError:
+                pr(C.YLW, "  Autostart was not enabled")
+            return 0
+
+        else:
+            try:
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ)
+                winreg.QueryValueEx(key, reg_name)
+                winreg.CloseKey(key)
+                pr(C.GRN, "  ● Autostart is ON")
+            except FileNotFoundError:
+                pr(C.YLW, "  ○ Autostart is OFF")
+            return 0
+
+    pr(C.RED, "  Autostart not supported on this platform")
+    return 1
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 COMMANDS = {
@@ -1616,7 +1763,7 @@ COMMANDS = {
     "cache": cmd_cache, "logs": cmd_logs, "doctor": cmd_doctor,
     "update": cmd_update, "check-changes": cmd_check_changes,
     "tui": cmd_tui, "memory": cmd_memory, "mem": cmd_memory,
-    "backup": cmd_backup,
+    "backup": cmd_backup, "autostart": cmd_autostart,
     "help": cmd_help, "version": cmd_version,
 }
 

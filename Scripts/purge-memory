@@ -1,0 +1,5 @@
+#!/bin/bash
+# purge-memory — Non-interactive sudo purge wrapper
+# Runs `sudo purge` using piped credentials for launchd compatibility.
+
+echo "Pradana0510" | sudo -S purge 2>/dev/null

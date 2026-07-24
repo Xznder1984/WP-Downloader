@@ -1,0 +1,11 @@
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+Build/
+Build/LiveWallpaper.app/
+dist/
+*.egg-info/
+*.whl
+*.tar.gz
+tmp/

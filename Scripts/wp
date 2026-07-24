@@ -259,22 +259,17 @@ def cmd_update(args):
 
         if args and args[0] == "auto":
             pr(C.CYN, "  Auto-updating...")
-            install_dir = Path(__file__).resolve().parent.parent
+            wp_url = f"https://raw.githubusercontent.com/Xznder1984/WP-Downloader/main/Scripts/wp"
             try:
-                subprocess.run(
-                    ["git", "-C", str(install_dir), "pull", "--rebase"],
-                    capture_output=True, text=True, timeout=30
-                )
-                # Re-run installer
-                install_py = install_dir / "install.py"
-                if install_py.exists():
-                    subprocess.run([sys.executable, str(install_py), "--upgrade"], timeout=120)
-                    pr(C.GRN, f"  Updated to v{latest}")
-                else:
-                    pr(C.YLW, "  Git updated but install.py not found")
+                req = urllib.request.Request(wp_url, headers={"User-Agent": f"wp/{current}"})
+                resp = urllib.request.urlopen(req, timeout=15)
+                new_content = resp.read().decode("utf-8")
+                me = Path(__file__).resolve()
+                me.write_text(new_content)
+                me.chmod(0o755)
+                pr(C.GRN, f"  Updated to v{latest}")
             except Exception as e:
                 pr(C.RED, f"  Auto-update failed: {e}")
-                pr(C.GRY, f"  Manual update: git pull && python3 install.py --upgrade")
                 return 1
         else:
             pr(C.GRY, "  Run: wp update auto")
@@ -2073,18 +2068,14 @@ def _auto_update():
     needs, cur, lat = check_for_update(silent=True)
     if not needs:
         return
-    install_dir = Path(__file__).resolve().parent.parent
+    wp_url = f"https://raw.githubusercontent.com/Xznder1984/WP-Downloader/main/Scripts/wp"
     try:
-        subprocess.run(
-            ["git", "-C", str(install_dir), "pull", "--rebase"],
-            capture_output=True, timeout=30
-        )
-        install_py = install_dir / "install.py"
-        if install_py.exists():
-            subprocess.run(
-                [sys.executable, str(install_py), "--upgrade"],
-                capture_output=True, timeout=120
-            )
+        req = urllib.request.Request(wp_url, headers={"User-Agent": f"wp/{cur}"})
+        resp = urllib.request.urlopen(req, timeout=15)
+        new_content = resp.read().decode("utf-8")
+        me = Path(__file__).resolve()
+        me.write_text(new_content)
+        me.chmod(0o755)
     except Exception:
         pass
 

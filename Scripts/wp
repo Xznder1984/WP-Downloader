@@ -416,8 +416,23 @@ def start_daemon():
                 start_new_session=True
             )
         else:
+            daemon = shutil.which(DAEMON_BIN)
+            if not daemon:
+                candidates = [
+                    Path.home() / ".local" / "bin" / "livewallpaper",
+                    Path(__file__).resolve().parent.parent / "Build" / "livewallpaper",
+                    Path(__file__).resolve().parent / "Build" / "livewallpaper",
+                    Path("/usr/local/bin/livewallpaper"),
+                ]
+                for c in candidates:
+                    if c.exists():
+                        daemon = str(c)
+                        break
+            if not daemon:
+                pr(C.RED, f"  Daemon binary not found. Run: python3 install.py")
+                return False
             subprocess.Popen(
-                [DAEMON_BIN],
+                [daemon],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 start_new_session=True
             )
@@ -1146,8 +1161,10 @@ def cmd_volume(args):
 
 def cmd_play(_args=None):
     if not is_daemon_running():
-        pr(C.RED, "  Daemon not running. Start with: wp set")
-        return 1
+        if not start_daemon():
+            return 1
+        pr(C.GRN, "  Wallpaper started")
+        return 0
     result = send_command("play")
     pr(C.GRN, "  Playback resumed") if result and "error" not in result else pr(C.RED, "  Failed")
     return 0
@@ -1162,8 +1179,10 @@ def cmd_pause(_args=None):
 
 def cmd_restart(_args=None):
     if not is_daemon_running():
-        pr(C.RED, "  Daemon not running")
-        return 1
+        if not start_daemon():
+            return 1
+        pr(C.GRN, "  Wallpaper started")
+        return 0
     result = send_command("reload")
     pr(C.GRN, "  Wallpaper restarted") if result and "error" not in result else pr(C.RED, "  Failed")
     return 0
@@ -1543,6 +1562,7 @@ def cmd_help(_args=None):
         (f"{C.BLD}wp memory{C.RST}            Manage hourly memory purge (macOS)"),
         (f"{C.BLD}wp autostart{C.RST}         Start wallpaper on login"),
         (f"{C.BLD}wp autopause{C.RST}         Auto-pause when watching videos"),
+        (f"{C.BLD}wp theme{C.RST}             Customize wp colors and appearance"),
         (f"{C.BLD}wp uninstall{C.RST}         Remove wp completely"),
         (f"{C.BLD}wp help{C.RST}              Show this help"),
         (f"{C.BLD}wp version{C.RST}           Show version"),
@@ -1571,6 +1591,13 @@ def cmd_help(_args=None):
     pr(C.WHT, f"    wp download-dir PATH  Change download directory")
     pr(C.WHT, f"    wp cache / clear / size")
     pr(C.WHT, f"    wp memory start / stop / now / status")
+    pr(C.WHT, f"    wp theme list           Show available themes")
+    pr(C.WHT, f"    wp theme set <name>     Apply a theme")
+    pr(C.WHT, f"    wp theme show <name>    Preview theme colors")
+    pr(C.WHT, f"    wp theme create <name>  Create custom theme")
+    pr(C.WHT, f"    wp theme edit           Open theme in $EDITOR")
+    pr(C.WHT, f"    wp theme validate       Check theme for errors")
+    pr(C.WHT, f"    wp theme reset          Reset to default")
     pr(C.WHT, f"    wp update             Check for updates")
     pr(C.WHT, f"    wp update auto        Auto-update from GitHub")
     print()
@@ -2148,6 +2175,201 @@ def cmd_uninstall(args):
     pr(C.GRN, "\n  wp uninstalled. Restart your terminal.")
     return 0
 
+# ── Theme Management ─────────────────────────────────────────────────────────
+
+ANSI_COLORS = {
+    "primary", "secondary", "accent", "error", "muted", "text", "border", "highlight", "bg",
+}
+
+def _validate_ansi_code(code):
+    if code is None:
+        return True
+    if not isinstance(code, str):
+        return False
+    parts = code.split(";")
+    if len(parts) > 4:
+        return False
+    for p in parts:
+        if not p.isdigit():
+            return False
+        n = int(p)
+        if not (0 <= n <= 255):
+            return False
+    return True
+
+def _fix_theme(data):
+    fixed = {}
+    issues = []
+    for key in sorted(data.keys()):
+        val = data[key]
+        if key == "name":
+            fixed[key] = val
+            continue
+        if key in ANSI_COLORS:
+            if val is None:
+                fixed[key] = None
+                continue
+            s = str(val).strip()
+            parts = s.split(";")
+            if len(parts) > 4:
+                issues.append(f"  {key}: truncated from {len(parts)} segments to 4")
+                parts = parts[:4]
+            clean_parts = []
+            for p in parts:
+                p = p.strip()
+                if not p.isdigit():
+                    issues.append(f"  {key}: removed non-numeric segment '{p}'")
+                    continue
+                n = int(p)
+                if n > 255:
+                    issues.append(f"  {key}: clamped {n} → 255")
+                    n = 255
+                clean_parts.append(str(n))
+            fixed[key] = ";".join(clean_parts) if clean_parts else None
+        else:
+            issues.append(f"  {key}: unknown key, removed")
+    for missing in ANSI_COLORS - set(fixed.keys()):
+        fixed[missing] = None
+        issues.append(f"  {missing}: added with default (None)")
+    return fixed, issues
+
+def cmd_theme(args):
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    theme_file = CONFIG_DIR / "theme.json"
+
+    if not args or args[0] in ("list", "ls", ""):
+        pr(C.CYN, "\n  Built-in Themes:")
+        current_name = "default"
+        if theme_file.exists():
+            try:
+                d = json.loads(theme_file.read_text())
+                current_name = d.get("name", "default")
+            except Exception:
+                pass
+        for name, colors in BUILTIN_THEMES.items():
+            marker = f"{C.GRN} *{C.RST}" if name == current_name else ""
+            pr(C.WHT, f"    {C.BLD}{name}{C.RST}{marker}")
+        if theme_file.exists():
+            try:
+                d = json.loads(theme_file.read_text())
+                if d.get("name") not in BUILTIN_THEMES and d.get("name") != "default":
+                    pr(C.WHT, f"    {C.BLD}{d['name']}{C.RST}{C.GRN} *{C.RST} {C.GRY}(custom){C.RST}")
+            except Exception:
+                pass
+        pr(C.GRY, "\n  * = current theme")
+        pr(C.GRY, "  wp theme set <name>     Apply a theme")
+        pr(C.GRY, "  wp theme show <name>    Preview theme colors")
+        pr(C.GRY, "  wp theme create <name>  Create custom theme")
+        pr(C.GRY, "  wp theme edit           Open theme in $EDITOR")
+        pr(C.GRY, "  wp theme validate       Check theme file for errors")
+        pr(C.GRY, "  wp theme reset          Reset to default")
+        print()
+        return 0
+
+    sub = args[0].lower()
+    rest = args[1:]
+
+    if sub == "set":
+        if not rest:
+            pr(C.RED, "  Usage: wp theme set <name>")
+            return 1
+        name = rest[0].lower()
+        if name not in BUILTIN_THEMES:
+            pr(C.RED, f"  Unknown theme: {name}")
+            pr(C.GRY, f"  Run 'wp theme list' to see available themes")
+            return 1
+        data = {"name": name, **BUILTIN_THEMES[name]}
+        theme_file.write_text(json.dumps(data, indent=2))
+        pr(C.GRN, f"  Theme set to: {name}")
+        pr(C.GRY, "  Restart wp for changes to take effect")
+        return 0
+
+    if sub == "show":
+        if not rest:
+            pr(C.RED, "  Usage: wp theme show <name>")
+            return 1
+        name = rest[0].lower()
+        if name not in BUILTIN_THEMES:
+            pr(C.RED, f"  Unknown theme: {name}")
+            return 1
+        colors = BUILTIN_THEMES[name]
+        pr(C.CYN, f"\n  Theme: {C.BLD}{name}{C.RST}")
+        for key, val in colors.items():
+            if val is None:
+                pr(C.GRY, f"    {key}: (default)")
+            else:
+                preview = f"\033[{val}m██\033[0m"
+                pr(C.WHT, f"    {key}: {val}  {preview}")
+        print()
+        return 0
+
+    if sub == "create":
+        if not rest:
+            pr(C.RED, "  Usage: wp theme create <name>")
+            return 1
+        name = rest[0].lower()
+        if name in BUILTIN_THEMES:
+            pr(C.RED, f"  '{name}' is a built-in theme. Choose a different name.")
+            return 1
+        data = {"name": name, **BUILTIN_THEMES["default"]}
+        custom_dir = CONFIG_DIR / "themes"
+        custom_dir.mkdir(parents=True, exist_ok=True)
+        custom_file = custom_dir / f"{name}.json"
+        custom_file.write_text(json.dumps(data, indent=2))
+        pr(C.GRN, f"  Created theme: {name}")
+        pr(C.GRY, f"  Edit: {custom_file}")
+        pr(C.GRY, f"  Apply: cp {custom_file} {theme_file}")
+        return 0
+
+    if sub == "edit":
+        editor = os.environ.get("EDITOR", os.environ.get("VISUAL", "nano"))
+        if not theme_file.exists():
+            theme_file.write_text(json.dumps({"name": "default", **BUILTIN_THEMES["default"]}, indent=2))
+        pr(C.CYN, f"  Opening {editor}...")
+        os.system(f'{editor} "{theme_file}"')
+        pr(C.GRN, "  Theme saved. Run: wp theme validate")
+        return 0
+
+    if sub == "validate":
+        if not theme_file.exists():
+            pr(C.GRN, "  No theme file found. Using default theme.")
+            return 0
+        try:
+            data = json.loads(theme_file.read_text())
+        except json.JSONDecodeError as e:
+            pr(C.RED, f"  Invalid JSON: {e}")
+            pr(C.GRY, "  Fix syntax and try again")
+            return 1
+        fixed, issues = _fix_theme(data)
+        if not issues:
+            pr(C.GRN, "  Theme is valid. No issues found.")
+            return 0
+        pr(C.YLW, f"  Found {len(issues)} issue(s):")
+        for issue in issues:
+            pr(C.WHT, issue)
+        pr(C.CYN, "\n  Auto-fix? (writes corrected theme)")
+        try:
+            confirm = input("  yes/no: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            confirm = "no"
+        if confirm in ("yes", "y"):
+            fixed["name"] = data.get("name", "custom")
+            theme_file.write_text(json.dumps(fixed, indent=2))
+            pr(C.GRN, "  Theme fixed and saved.")
+        else:
+            pr(C.GRY, "  Skipped. Edit manually: wp theme edit")
+        return 0
+
+    if sub == "reset":
+        if theme_file.exists():
+            theme_file.unlink()
+        pr(C.GRN, "  Theme reset to default")
+        return 0
+
+    pr(C.RED, f"  Unknown subcommand: {sub}")
+    pr(C.GRY, "  Run 'wp theme' for usage")
+    return 1
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 COMMANDS = {
@@ -2164,6 +2386,7 @@ COMMANDS = {
     "backup": cmd_backup, "autostart": cmd_autostart,
     "autopause": cmd_autopause, "_autopause_monitor": lambda a: _auto_pause_monitor(),
     "uninstall": cmd_uninstall,
+    "theme": cmd_theme,
     "help": cmd_help, "version": cmd_version,
 }
 

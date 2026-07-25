@@ -113,6 +113,12 @@ def copy_files():
     os.chmod(str(dst), 0o755)
     print(f"  → {dst}")
     if IS_MACOS:
+        daemon_src = Path(__file__).parent / "Build" / "livewallpaper"
+        if daemon_src.exists():
+            daemon_dst = wp_dst / "livewallpaper"
+            shutil.copy2(str(daemon_src), str(daemon_dst))
+            os.chmod(str(daemon_dst), 0o755)
+            print(f"  → {daemon_dst}")
         print("\n✅ Installed! Restart your terminal.")
     else:
         print(f"\n✅ Installed! Add {wp_dst} to your PATH if needed:")

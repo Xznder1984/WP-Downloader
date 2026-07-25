@@ -28,15 +28,20 @@ python3 install.py
 wp                          # open the TUI
 wp youtube <url>            # download + set YouTube video
 wp spotify <query>          # download from Spotify
+wp url <url>                # download from any site (Vimeo, TikTok, Reddit...)
 wp set                      # pick a local file
 wp stop                     # stop the wallpaper
 wp play / wp pause          # control playback
 wp audio on/off             # toggle audio
 wp audio 50                 # set volume
+wp autostart on/off         # start wallpaper on login
+wp autopause on/off         # pause when watching videos
+wp backup / wp backup diff  # save/compare config backups
 wp status                   # show what's running
 wp cache                    # list downloaded files
 wp cache clear              # free up space
 wp download-dir ~/Videos    # change where files go
+wp theme list               # show available themes
 wp doctor                   # check if everything's installed
 wp update                   # check for updates
 ```
@@ -81,6 +86,24 @@ The engine files are in `Sources/`. If you want to change how videos are rendere
 After editing Swift files, rebuild: `make` (macOS) or `swiftc -O -o Build/livewallpaper Sources/*.swift`
 
 Python engines don't need building. Just restart the daemon: `wp restart`
+
+## Theming
+
+Customize `wp`'s colors and appearance:
+
+```bash
+wp theme list          # show available themes
+wp theme set dracula   # apply a theme
+wp theme show nord     # preview a theme's colors
+wp theme create myname # create a custom theme
+wp theme edit          # open current theme in $EDITOR
+wp theme validate      # check theme file for errors (auto-fixes issues)
+wp theme reset         # back to default
+```
+
+Built-in themes: `default`, `dracula`, `nord`, `monokai`, `solarized`, `gruvbox`, `catppuccin`, `tokyo-night`.
+
+Custom themes live in `~/.config/livewallpaper/themes/` and use the same JSON format. Run `wp theme validate` after editing — it catches invalid ANSI codes, clamps out-of-range values, removes unknown keys, and fills in missing fields.
 
 ## Updating
 
